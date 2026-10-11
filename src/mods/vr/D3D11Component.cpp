@@ -638,13 +638,14 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
     bool ff7_mono = false;
     D3D11_TEXTURE2D_DESC ff7_scene_desc{};
     if (uevr::ff7_auto::executable_matches()) backbuffer->GetDesc(&ff7_scene_desc);
-    if (uevr::ff7_auto::executable_matches() && runtime->is_openxr() &&
+    const bool ff7_eligible = uevr::ff7_auto::executable_matches() && runtime->is_openxr() &&
         !is_actually_afr && !vr->is_native_stereo_fix_enabled() &&
         !vr->is_native_stereo_fix_texture_array_submit_enabled() &&
         ff7_scene_desc.Width == static_cast<UINT>(vr->get_hmd_width()) * 2 &&
         ff7_scene_desc.Height == static_cast<UINT>(vr->get_hmd_height()) &&
         ff7_scene_desc.Width == m_backbuffer_size[0] && ff7_scene_desc.Height == m_backbuffer_size[1] &&
-        !vr->is_extreme_compatibility_mode_enabled() && !vr->m_2d_screen_mode->value()) {
+        !vr->is_extreme_compatibility_mode_enabled() && !vr->m_2d_screen_mode->value();
+    if (ff7_eligible) {
         ff7_mono = m_ff7_auto_mono.poll(device, context.Get(), backbuffer.Get(), GetTickCount64());
     } else {
         m_ff7_auto_mono.reset();
@@ -988,6 +989,21 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
 
     const auto is_2d_screen = vr->is_using_2d_screen();
     const auto ui_invert_alpha = vr->get_overlay_component().get_ui_invert_alpha();
+    if (uevr::ff7_auto::executable_matches()) {
+        D3D11_TEXTURE2D_DESC ui_desc{};
+        if (m_engine_ui_ref.has_texture()) {
+            ComPtr<ID3D11Texture2D> ui{};
+            if (SUCCEEDED(m_engine_ui_ref.tex.As(&ui))) ui->GetDesc(&ui_desc);
+        }
+        SPDLOG_INFO_EVERY_N_SEC(5,
+            "[FF7][ui-diagnostics] frame={} scene={}x{} fmt={} eligible={} supported={} mono={} samples={} lit={}/{} pending={} ui={}x{} fmt={} overlay={} 2d={} afr={} native_fix={} depth_requested={}",
+            vr->m_render_frame_count, ff7_scene_desc.Width, ff7_scene_desc.Height,
+            static_cast<unsigned>(ff7_scene_desc.Format), ff7_eligible,
+            uevr::ff7_auto::Sampler::supported(ff7_scene_desc), ff7_mono,
+            m_ff7_auto_mono.samples(), m_ff7_auto_mono.left_lit(), m_ff7_auto_mono.right_lit(),
+            m_ff7_auto_mono.pending(), ui_desc.Width, ui_desc.Height, static_cast<unsigned>(ui_desc.Format),
+            vr->is_gui_enabled(), is_2d_screen, is_actually_afr, vr->is_native_stereo_fix_enabled(), vr->is_depth_enabled());
+    }
 
     auto draw_2d_view = [&]() {
         if (!is_2d_screen || !m_engine_tex_ref.has_texture() || !m_engine_tex_ref.has_srv()) {

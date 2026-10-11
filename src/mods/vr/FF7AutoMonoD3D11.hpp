@@ -22,6 +22,7 @@ public:
     void reset() {
         m_staging.Reset(); m_query.Reset(); m_device.Reset();
         m_pending = false; m_last_request = 0; m_desc = {}; m_decision.reset();
+        m_samples = 0; m_left_lit = m_right_lit = 0;
     }
     bool poll(ID3D11Device* device, ID3D11DeviceContext* context,
               ID3D11Texture2D* scene, uint64_t now) {
@@ -34,7 +35,8 @@ public:
             D3D11_TEXTURE2D_DESC staging{};
             staging.Width = 72; staging.Height = 1;
             staging.MipLevels = staging.ArraySize = staging.SampleDesc.Count = 1;
-            staging.Format = desc.Format;
+            staging.Format = desc.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS ? DXGI_FORMAT_B8G8R8A8_UNORM
+                : desc.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS ? DXGI_FORMAT_R8G8B8A8_UNORM : desc.Format;
             staging.Usage = D3D11_USAGE_STAGING;
             staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
             D3D11_QUERY_DESC query{D3D11_QUERY_EVENT, 0};
@@ -57,6 +59,7 @@ public:
                         if (p[0] > 12 || p[1] > 12 || p[2] > 12) ++lit[i / 36];
                     }
                     context->Unmap(m_staging.Get(), 0);
+                    ++m_samples; m_left_lit = lit[0]; m_right_lit = lit[1];
                     m_decision.update(lit[0], lit[1], now);
                     m_pending = false;
                 } else if (result != DXGI_ERROR_WAS_STILL_DRAWING) { reset(); return false; }
@@ -78,13 +81,18 @@ public:
         return m_decision.active(now);
     }
     static bool supported(const D3D11_TEXTURE2D_DESC& d) {
-        const bool format = d.Format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+        const bool format = d.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS ||
+            d.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS || d.Format == DXGI_FORMAT_B8G8R8A8_UNORM ||
             d.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
             d.Format == DXGI_FORMAT_R8G8B8A8_UNORM ||
             d.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
         return format && d.Width >= 14 && d.Width % 2 == 0 && d.Height >= 7 &&
             d.ArraySize == 1 && d.MipLevels == 1 && d.SampleDesc.Count == 1;
     }
+    uint64_t samples() const { return m_samples; }
+    unsigned left_lit() const { return m_left_lit; }
+    unsigned right_lit() const { return m_right_lit; }
+    bool pending() const { return m_pending; }
 private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_staging{};
     Microsoft::WRL::ComPtr<ID3D11Query> m_query{};
@@ -93,5 +101,7 @@ private:
     swgr_auto::Decision m_decision{};
     bool m_pending{};
     uint64_t m_last_request{};
+    uint64_t m_samples{};
+    unsigned m_left_lit{}, m_right_lit{};
 };
 }

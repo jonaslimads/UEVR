@@ -11,6 +11,7 @@
 #include "../utility/ImGui.hpp"
 
 #include "OverlayComponent.hpp"
+#include "FF7AutoMonoD3D11.hpp"
 
 namespace vrmod {
 void OverlayComponent::on_reset() {
@@ -1080,6 +1081,13 @@ std::optional<std::reference_wrapper<XrCompositionLayerBaseHeader>> OverlayCompo
     const UILayerPoseBasis* pose_basis,
     bool force_stage_space)
 {
+    if (uevr::ff7_auto::executable_matches()) {
+        SPDLOG_INFO_EVERY_N_SEC(5,
+            "[FF7][ui-layer] frame={} swapchain={} eye_visibility={} gui={} overlay_type={} follow_view={} distance={} size={}",
+            VR::get()->m_render_frame_count, static_cast<unsigned>(swapchain), static_cast<int>(eye),
+            VR::get()->is_gui_enabled(), m_parent->m_slate_overlay_type->value(),
+            m_parent->m_ui_follows_view->value(), m_parent->m_slate_distance->value(), m_parent->m_slate_size->value());
+    }
     switch ((OverlayComponent::OverlayType)m_parent->m_slate_overlay_type->value()) {
     default:
     case OverlayComponent::OverlayType::QUAD:
