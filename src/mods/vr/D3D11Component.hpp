@@ -4,6 +4,7 @@
 #include <dxgi.h>
 #include <openvr.h>
 #include <wrl.h>
+#include "FF7AutoMonoD3D11.hpp"
 
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -43,6 +44,8 @@ public:
     void force_reset() { m_force_reset = true; }
 
 private:
+    uevr::ff7_auto::Sampler m_ff7_auto_mono{};
+    bool m_ff7_mono_active{};
     friend class render::FrameResourceInspector;
 
     template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;

@@ -635,6 +635,25 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
         }
     }
 
+    bool ff7_mono = false;
+    D3D11_TEXTURE2D_DESC ff7_scene_desc{};
+    if (uevr::ff7_auto::executable_matches()) backbuffer->GetDesc(&ff7_scene_desc);
+    if (uevr::ff7_auto::executable_matches() && runtime->is_openxr() &&
+        !is_actually_afr && !vr->is_native_stereo_fix_enabled() &&
+        !vr->is_native_stereo_fix_texture_array_submit_enabled() &&
+        ff7_scene_desc.Width == static_cast<UINT>(vr->get_hmd_width()) * 2 &&
+        ff7_scene_desc.Height == static_cast<UINT>(vr->get_hmd_height()) &&
+        ff7_scene_desc.Width == m_backbuffer_size[0] && ff7_scene_desc.Height == m_backbuffer_size[1] &&
+        !vr->is_extreme_compatibility_mode_enabled() && !vr->m_2d_screen_mode->value()) {
+        ff7_mono = m_ff7_auto_mono.poll(device, context.Get(), backbuffer.Get(), GetTickCount64());
+    } else {
+        m_ff7_auto_mono.reset();
+    }
+    if (ff7_mono != m_ff7_mono_active) {
+        spdlog::info("[FF7][auto-mono][D3D11] {}", ff7_mono ? "left-eye scene duplicated; depth disabled" : "native stereo restored");
+        m_ff7_mono_active = ff7_mono;
+    }
+
     const auto& ffsr = VR::get()->m_fake_stereo_hook;
     namespace frame_diag = uevr::native_frame;
     frame_diag::Ticket native_frame_ticket{};
@@ -1130,7 +1149,7 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
 
     ComPtr<ID3D11Texture2D> scene_depth_tex{};
 
-    if (vr->is_depth_enabled() && runtime->is_depth_allowed()) {
+    if (!ff7_mono && vr->is_depth_enabled() && runtime->is_depth_allowed()) {
         auto& rt_pool = vr->get_render_target_pool_hook();
         scene_depth_tex = rt_pool->get_texture<ID3D11Texture2D>(L"SceneDepthZ");
 
@@ -1289,7 +1308,13 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
                 }
             } else {
                 // Copy over the entire double wide back buffer instead
-                if (native_stereo_packet == nullptr || !m_scene_capture_tex_ref.has_texture()) {
+                if (ff7_mono) {
+                    m_openxr.copy((uint32_t)runtimes::OpenXR::SwapchainIndex::DOUBLE_WIDE, nullptr, nullptr, [&](ID3D11Texture2D* render_target) {
+                        const D3D11_BOX left{0, 0, 0, m_backbuffer_size[0] / 2, m_backbuffer_size[1], 1};
+                        context->CopySubresourceRegion(render_target, 0, 0, 0, 0, backbuffer.Get(), 0, &left);
+                        context->CopySubresourceRegion(render_target, 0, m_backbuffer_size[0] / 2, 0, 0, backbuffer.Get(), 0, &left);
+                    });
+                } else if (native_stereo_packet == nullptr || !m_scene_capture_tex_ref.has_texture()) {
                     m_openxr.copy((uint32_t)runtimes::OpenXR::SwapchainIndex::DOUBLE_WIDE, backbuffer.Get(), nullptr);
                 } else {
                     // copy invokes this callback synchronously; the local packet
@@ -1702,6 +1727,8 @@ void D3D11Component::on_post_present(VR* vr) {
 }
 
 void D3D11Component::on_reset(VR* vr) {
+    m_ff7_auto_mono.reset();
+    m_ff7_mono_active = false;
     m_force_reset = true;
     m_daysgone_ahud_was_active = false;
 
