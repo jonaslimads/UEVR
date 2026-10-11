@@ -35,6 +35,7 @@
 #include "GalacticRacerStereoCopy.hpp"
 #include "GalacticRacerCutsceneDiagnostics.hpp"
 #include "GalacticRacerTestPolicy.hpp"
+#include "ServerPerformanceTrace.hpp"
 
 //#define AFR_DEPTH_TEMP_DISABLED
 
@@ -2957,6 +2958,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
             !vr->is_native_stereo_fix_texture_array_submit_enabled() &&
             m_game_tex.texture != nullptr && backbuffer.Get() == m_game_tex.texture.Get() && scene_source_state == ENGINE_SRC_COLOR;
         if (policy.auto_mono && mono_layout_eligible) {
+            uevr::server_performance::Scope trace_mono{uevr::server_performance::Stage::MonoPoll};
             swgr_manual_mono_active = m_swgr_auto_mono.poll(device, m_game_tex.texture.Get(),
                 m_scene_capture_tex.texture.Get(), m_backbuffer_size[0] / 2, m_scene_capture_generation, scene_source_state);
         }

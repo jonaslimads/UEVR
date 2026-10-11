@@ -50,6 +50,7 @@
 #include "VR.hpp"
 #include "vr/Stalker2NativePolicy.hpp"
 #include "vr/ServerPerformancePolicy.hpp"
+#include "vr/ServerPerformanceTrace.hpp"
 #include "UObjectHook.hpp"
 #include "GameSpecific.hpp"
 #include "vr/KtjLOpenXRFactory.hpp"
@@ -7709,6 +7710,8 @@ void VR::on_config_load(const utility::Config& cfg, bool set_defaults) {
         const bool target_game = exe_path && sdk::galactic_racer::executable(*exe_path);
         const auto path = uevr::server_performance::ini_path(g_framework->get_framework_module());
         m_launch_frame_timing_diagnostics = uevr::server_performance::read_enabled(path, target_game);
+        uevr::server_performance::detailed_enabled.store(
+            uevr::server_performance::read_detailed_enabled(path, target_game), std::memory_order_relaxed);
         m_launch_frame_timing_initialized = true;
     }
 
@@ -7721,6 +7724,8 @@ void VR::on_config_load(const utility::Config& cfg, bool set_defaults) {
         cfg.get("VR_FrameTimingDiagnostics").value_or("<missing>"),
         m_frame_timing_diagnostics->value(), m_launch_frame_timing_diagnostics,
         is_frame_timing_enabled(), is_hitch_diagnostics_enabled(), GetCurrentThreadId());
+    spdlog::info("[SWGR][trace-config] render_trace={} fixed_buckets=true report_interval_s=5 thread_cpu_quantized=true",
+        uevr::server_performance::detailed_enabled.load(std::memory_order_relaxed));
 
     if (set_defaults && is_subnautica2_executable()) {
         // Subnautica 2's UE5.6 native path can render SingleLayerWater black in the right eye.
@@ -7761,6 +7766,9 @@ void VR::on_config_load(const utility::Config& cfg, bool set_defaults) {
 
 void VR::on_config_save(utility::Config& cfg) {
     ZoneScopedN(__FUNCTION__);
+    spdlog::info("[VR][timing-save] profile={} launch={} effective={} render_trace={}",
+        m_frame_timing_diagnostics->value(), m_launch_frame_timing_diagnostics, is_frame_timing_enabled(),
+        uevr::server_performance::detailed_enabled.load(std::memory_order_relaxed));
 
     for (IModValue& option : m_options) {
         option.config_save(cfg);

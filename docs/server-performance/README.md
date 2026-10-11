@@ -34,6 +34,16 @@ Timers can nest and overlap. Do not sum them as independent costs. Low overall C
 
 ## Safe experiment sequence
 
+### v3 stage tracing
+
+The provided launch INI additionally sets `RenderTrace=1` for SWGR. This emits fixed-size, per-thread five-second summaries under `[SWGR][stage-profiler]` for engine tick/original tick, native-family dispatch/original linked renderer, the complete pre-render callback including its deferred worker, the worker alone, Slate routing/restoration, render-texture callbacks/Slate worker and automatic-mono polling. `[SWGR][stage-thread]` records each stage's Windows thread name and ID. `[SWGR][family-layout]` records input and linked-family counts, view counts, capture extent and generation.
+
+Each stage reports inclusive wall time, wall time excluding directly nested instrumented scopes, inclusive thread CPU time, histogram percentile upper bounds, calls per second, entry intervals and calls exceeding the 90 Hz frame budget. CPU time is quantized by Windows accounting and can exceed individual short wall samples; interpret aggregates. The final histogram overflow is printed as infinity. Exclusive time excludes only instrumented child scopes, not arbitrary engine work. Asynchronous render commands continue outside the game-thread dispatch scope.
+
+Thread identification and the stage's own summary emission are outside its sample; enclosing scopes can still observe logging and timing overhead. There is no shared diagnostic aggregation lock and no background sampler, thread suspension or stack walk in these hooks. CPU-time queries add overhead. Disable `RenderTrace` for a separate overhead comparison. Partial buckets at shutdown may not be emitted. These diagnostics are not an optimization or an FPS-gain claim.
+
+`[VR][timing-save]` and `[SWGR][trace-config]` make profile saves and effective trace activation visible. The launch file remains independent of profile persistence. Use an external sampled CPU trace to identify the expensive functions outside these instrumented boundaries; the profiles repository includes `tools/performance/Collect-CPUStacks.ps1` for the local WPR CPU profile. This requires an administrator terminal, refuses to replace an existing recording, and saves an ETL plus module/PID metadata outside the repository. Filter CPU Usage (Sampled) to the recorded game PID and hot render TID, then use the matching backend PDB to attribute UEVR frames. CPU profile stack collection and its overhead require a separate short run.
+
 1. Capture the existing installed build as a baseline with shader compilation finished.
 2. Install this experimental build separately and test with frame timing enabled, original mirror settings and Very Late synchronization.
 3. Measure a repeatable racing interval, then validate menus, both eyes, cinematics, crash/explosion mono transitions and stereo recovery.

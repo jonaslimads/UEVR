@@ -27,6 +27,7 @@
 
 #include <nlohmann/json.hpp>
 #include "NativeFrameDiagnosticsJson.hpp"
+#include "ServerPerformanceTrace.hpp"
 #include <spdlog/spdlog.h>
 #include <utility/Memory.hpp>
 #include <utility/Module.hpp>
@@ -14088,6 +14089,7 @@ void FFakeStereoRenderingHook::attempt_hook_game_engine_tick(uintptr_t return_ad
 }
 
 void* FFakeStereoRenderingHook::engine_tick_hook(sdk::UGameEngine* engine, float delta, bool idle) {
+    uevr::server_performance::Scope trace_tick{uevr::server_performance::Stage::EngineTick};
     ZoneScopedN("UGameEngine::Tick Hook");
     FrameMarkStart("UGameEngine::Tick");
 
@@ -14183,6 +14185,7 @@ void* FFakeStereoRenderingHook::engine_tick_hook(sdk::UGameEngine* engine, float
     void* result = nullptr;
 
     {
+        uevr::server_performance::Scope trace_original{uevr::server_performance::Stage::EngineOriginal};
         if (hook->m_safe_tick_hook->value()) {
             result = (hook->m_nascar_tick.original_address() ? hook->m_nascar_tick.call<void*>(engine, delta, idle) : hook->m_tick_hook.call<void*>(engine, delta, idle));
         } else {
@@ -14238,6 +14241,7 @@ bool pre_find_slate_thread() {
 }
 
 void FFakeStereoRenderingHook::swgr_slate_output_hook(safetyhook::Context& ctx) {
+    uevr::server_performance::Scope trace_slate{uevr::server_performance::Stage::SlateRoute};
     if (g_swgr_slate_transaction.identity.active() || !swgr_ue574_dx12_runtime() || !g_hook ||
         !g_framework->is_game_data_intialized()) { return; }
     const auto memory = sdk::discovery::process_memory();
@@ -14277,6 +14281,7 @@ void FFakeStereoRenderingHook::swgr_slate_output_hook(safetyhook::Context& ctx) 
 }
 
 void FFakeStereoRenderingHook::swgr_slate_output_restore_hook(safetyhook::Context& ctx) {
+    uevr::server_performance::Scope trace_slate{uevr::server_performance::Stage::SlateRestore};
     if (g_swgr_slate_transaction.identity.complete(ctx.rsp, ctx.rbp, ctx.r14)) {
         g_swgr_slate_transaction.ui.reset();
         g_swgr_slate_transaction.lifetime.unlock();
@@ -24108,6 +24113,7 @@ void FFakeStereoRenderingHook::localplayer_setup_viewpoint(void* localplayer, vo
 }
 
 void FFakeStereoRenderingHook::begin_render_viewfamily_real(void* render_module, sdk::FCanvas* canvas, sdk::FSceneViewFamily* view_family_candidate) {
+    uevr::server_performance::Scope trace_dispatch{uevr::server_performance::Stage::ViewFamilyDispatch};
     ZoneScopedN("BeginRenderViewFamilyReal");
     g_hook->m_render_module_begin_render_viewfamily_observed.store(true, std::memory_order_release);
     const auto profile_engine_render = should_profile_engine_render_timing();
@@ -25661,10 +25667,19 @@ void FFakeStereoRenderingHook::begin_render_viewfamily_real(void* render_module,
 
         SPDLOG_INFO_ONCE(
             "[UE5.7][NativeStereoFix] Rendering linked eye families with the secondary singleton adapted to an internal primary view");
-        g_hook->m_render_module_begin_render_viewfamily_hook.unsafe_call<void>(
-            render_module,
-            canvas,
-            reinterpret_cast<sdk::FSceneViewFamily*>(&linked_family_array));
+        if (uevr::server_performance::detailed_enabled.load(std::memory_order_relaxed)) {
+            SPDLOG_INFO_EVERY_N_SEC(5, "[SWGR][family-layout] tid={} original_families={} linked_families={} original_views={} left_views={} right_views={} capture={}x{} generation={}",
+                GetCurrentThreadId(), view_families.size(), linked_family_count, prev_count,
+                views.count, right_views->count, native_capture_snapshot->width,
+                native_capture_snapshot->height, native_capture_snapshot->generation);
+        }
+        {
+            uevr::server_performance::Scope trace_linked{uevr::server_performance::Stage::LinkedOriginal};
+            g_hook->m_render_module_begin_render_viewfamily_hook.unsafe_call<void>(
+                render_module,
+                canvas,
+                reinterpret_cast<sdk::FSceneViewFamily*>(&linked_family_array));
+        }
 
         const bool right_singleton_restored = right_singleton_primary.restore();
         const bool right_rects_restored = swgr_right_rects.restore();
@@ -26879,9 +26894,11 @@ void FFakeStereoRenderingHook::pre_render_view_renderthread(
 }
 
 void FFakeStereoRenderingHook::pre_render_viewfamily_renderthread(ISceneViewExtension* extension, sdk::FRHICommandListBase* cmd_list, sdk::FSceneViewFamily& view_family) {
+    uevr::server_performance::Scope trace_prerender{uevr::server_performance::Stage::PreRenderCallback};
     // Install this before Dune validation and de-duplication so a delegated
     // slot-7 callback always services the queue exactly once.
     utility::ScopeGuard render_thread_worker_guard{[]() {
+        uevr::server_performance::Scope trace_worker{uevr::server_performance::Stage::RenderWorker};
         RenderThreadWorker::get().execute();
         if (is_validated_ue58_slate_ui_runtime() && is_ue58_dx12_backend() &&
             g_framework->is_game_data_intialized() && g_hook->has_seen_prerender_viewfamily())
@@ -29692,6 +29709,7 @@ __forceinline Matrix4x4f* FFakeStereoRenderingHook::calculate_stereo_projection_
 __forceinline void FFakeStereoRenderingHook::render_texture_render_thread(FFakeStereoRendering* stereo, FRHICommandListImmediate* rhi_command_list,
     FRHITexture2D* backbuffer, FRHITexture2D* src_texture, double window_size) 
 {
+    uevr::server_performance::Scope trace_texture{uevr::server_performance::Stage::RenderTexture};
     if (!g_framework->is_game_data_intialized()) {
         return;
     }
@@ -29710,7 +29728,10 @@ __forceinline void FFakeStereoRenderingHook::render_texture_render_thread(FFakeS
         g_hook->attempt_hook_slate_thread(return_address);
     }
 
-    g_hook->get_slate_thread_worker()->execute(rhi_command_list);
+    {
+        uevr::server_performance::Scope trace_worker{uevr::server_performance::Stage::SlateWorker};
+        g_hook->get_slate_thread_worker()->execute(rhi_command_list);
+    }
 
     /*const auto return_address = (uintptr_t)_ReturnAddress();
     const auto slate_cvar_usage_location = sdk::vr::get_slate_draw_to_vr_render_target_usage_location();

@@ -20,4 +20,8 @@ inline bool read_enabled(const std::wstring& path, bool target_game) {
     // Only the exact numeric value 1 enables it; missing files remain off.
     return GetPrivateProfileIntW(L"Diagnostics", L"FrameTiming", 0, path.c_str()) == 1;
 }
+inline bool read_detailed_enabled(const std::wstring& path, bool target_game) {
+    return target_game && !path.empty() &&
+        GetPrivateProfileIntW(L"Diagnostics", L"RenderTrace", 0, path.c_str()) == 1;
+}
 }
