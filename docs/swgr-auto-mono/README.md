@@ -37,4 +37,4 @@ cmake --build build/swgr-auto-mono-tests --config Release
 ctest --test-dir build/swgr-auto-mono-tests -C Release --output-on-failure
 ```
 
-Six tests passed. They validate CPU-side policy and copy parameters, not GPU execution or headset behavior. For the original local build and test context, see `TEST-NOTES.pt-BR.md`.
+Six tests passed. They validate CPU-side policy and copy parameters, not GPU execution or headset behavior.
