@@ -90,6 +90,8 @@
 #include "GalacticRacerNativeFix.hpp"
 #include "GalacticRacerBinkSeek.hpp"
 #include "GalacticRacerBink.hpp"
+#include "GalacticRacerCutsceneDiagnostics.hpp"
+#include "GalacticRacerTestPolicy.hpp"
 #include "HalloweenNativeFix.hpp"
 #include "KtjLFogResources.hpp"
 #include "KtjLCloudResources.hpp"
@@ -14316,9 +14318,26 @@ void FFakeStereoRenderingHook::swgr_bink_packet_hook(safetyhook::Context& ctx) {
     };
     uevr::swgr_bink::Packet packet{};
     if (!sdk::discovery::process_memory().load(ctx.rdi, packet)) { return; }
+    uevr::swgr_diag::packets.fetch_add(1, std::memory_order_relaxed);
+    uevr::swgr_diag::width.store(packet.width, std::memory_order_relaxed);
+    uevr::swgr_diag::height.store(packet.height, std::memory_order_relaxed);
+    uevr::swgr_diag::hdr.store(packet.hdr, std::memory_order_relaxed);
+    uevr::swgr_diag::packet_texture.store(packet.texture, std::memory_order_relaxed);
+    if (!uevr::swgr_test::policy(g_framework->get_framework_module()).redirect_bink) {
+        SPDLOG_INFO_EVERY_N_SEC(2, "[SWGRSuite][BinkOriginal] Keeping the original viewport packet target={:x} size={}x{} hdr={} state={}",
+            packet.texture, packet.width, packet.height, packet.hdr, packet.resource_state);
+        return;
+    }
     const auto redirected = uevr::swgr_bink::redirected_packet(packet, scope->command, target(*scope->scene), target(*scope->ui));
     if (!redirected || !is_writable_process_range(ctx.rdi, sizeof(packet)) ||
-        !swgr_write_bink_packet(ctx.rdi, *redirected)) { return; }
+        !swgr_write_bink_packet(ctx.rdi, *redirected)) {
+        uevr::swgr_diag::rejected.fetch_add(1, std::memory_order_relaxed);
+        SPDLOG_WARNING_EVERY_N_SEC(1, "[SWGRFix-v1][BinkPacket] redirect rejected texture={:x} scene={:x} ui={:x} size={}x{} hdr={} state={}",
+            packet.texture, scope->scene->source_texture, scope->ui->source_texture,
+            packet.width, packet.height, packet.hdr, packet.resource_state);
+        return;
+    }
+    uevr::swgr_diag::redirected.fetch_add(1, std::memory_order_relaxed);
     SPDLOG_INFO_EVERY_N_SEC(10, "[SWGR][BinkUI] Viewport movies routed to dedicated UI {}x{} generation={}; original playback retained",
         packet.width, packet.height, scope->ui->generation);
 }

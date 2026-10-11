@@ -20,6 +20,7 @@
 #include <../../directxtk12-src/Inc/DescriptorHeap.h>
 
 #include "d3d12/CommandContext.hpp"
+#include "GalacticRacerAutoMono.hpp"
 #include "d3d12/TextureContext.hpp"
 #include "Stalker2NativeD3D12.hpp"
 
@@ -222,6 +223,7 @@ private:
     d3d12::TextureContext m_ue58_spectator_tex{};
     bool m_ue58_dedicated_ui_spectator_valid{};
     d3d12::TextureContext m_scene_capture_tex{};
+    uevr::swgr_auto::Sampler m_swgr_auto_mono{};
     uint64_t m_scene_capture_generation{};
     uint32_t m_scene_capture_width{};
     uint32_t m_scene_capture_height{};

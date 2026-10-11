@@ -32,6 +32,9 @@
 
 #include "D3D12Component.hpp"
 #include "GalacticRacerRenderTargets.hpp"
+#include "GalacticRacerStereoCopy.hpp"
+#include "GalacticRacerCutsceneDiagnostics.hpp"
+#include "GalacticRacerTestPolicy.hpp"
 
 //#define AFR_DEPTH_TEMP_DISABLED
 
@@ -2944,6 +2947,52 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
         native_stereo_packet.reset();
     }
 
+    const bool swgr_game = sdk::galactic_racer::current_game();
+    bool swgr_manual_mono_active = false;
+    if (swgr_game) {
+        const auto& policy = uevr::swgr_test::policy(g_framework->get_framework_module());
+        SPDLOG_INFO_ONCE("[SWGRSuite] variant={} redirect_bink={} manual_mono_allowed={} auto_mono={}; policy loaded once from backend directory SWGRFix-test.ini",
+            policy.variant, policy.redirect_bink, policy.allow_manual_mono, policy.auto_mono);
+        const bool mono_layout_eligible = is_swgr_external_backbuffer && !is_actually_afr && runtime->is_openxr() &&
+            !vr->is_native_stereo_fix_texture_array_submit_enabled() &&
+            m_game_tex.texture != nullptr && backbuffer.Get() == m_game_tex.texture.Get() && scene_source_state == ENGINE_SRC_COLOR;
+        if (policy.auto_mono && mono_layout_eligible) {
+            swgr_manual_mono_active = m_swgr_auto_mono.poll(device, m_game_tex.texture.Get(),
+                m_scene_capture_tex.texture.Get(), m_backbuffer_size[0] / 2, m_scene_capture_generation, scene_source_state);
+        }
+        if (policy.allow_manual_mono) {
+            const bool down = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+            if (down && !uevr::swgr_test::f9_down.exchange(true)) {
+                const bool requested = !uevr::swgr_test::mono_requested.load();
+                uevr::swgr_test::mono_requested.store(requested);
+                SPDLOG_INFO("[SWGRSuite][ManualMono] F9 requested={}; toggle OFF before racing to restore depth", requested);
+            } else if (!down) { uevr::swgr_test::f9_down.store(false); }
+            swgr_manual_mono_active = mono_layout_eligible &&
+                (swgr_manual_mono_active || uevr::swgr_test::mono_requested.load());
+        }
+    }
+    const bool swgr_independent_copy_states = uevr::swgr_copy::use_independent_states(
+        is_swgr_external_backbuffer, native_stereo_packet != nullptr && scene_capture_packet_ready,
+        m_game_tex.texture != nullptr && backbuffer.Get() == m_game_tex.texture.Get(), scene_source_state);
+    if (sdk::galactic_racer::current_game()) {
+        const bool marker_down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+        if (marker_down && !uevr::swgr_diag::marker_down.exchange(marker_down)) {
+            SPDLOG_INFO("[SWGRFix-v1] MARKER {} (F8)", ++uevr::swgr_diag::marker);
+        } else if (!marker_down) {
+            uevr::swgr_diag::marker_down.store(false);
+        }
+        const auto left_desc = m_game_tex.texture ? m_game_tex.texture->GetDesc() : D3D12_RESOURCE_DESC{};
+        const auto right_desc = m_scene_capture_tex.texture ? m_scene_capture_tex.texture->GetDesc() : D3D12_RESOURCE_DESC{};
+        SPDLOG_INFO_EVERY_N_SEC(1,
+            "[SWGRFix-v1][Frame] frame={} native_packet={} capture_ready={} generation={} independent_states={} left={}x{} fmt={} right={}x{} fmt={} scene_state={} ui_generation={} bink_packets={} redirected={} rejected={} last_packet={}x{} hdr={} texture={:x}",
+            frame_count, native_stereo_packet != nullptr, scene_capture_packet_ready, m_scene_capture_generation,
+            swgr_independent_copy_states, left_desc.Width, left_desc.Height, uint32_t(left_desc.Format),
+            right_desc.Width, right_desc.Height, uint32_t(right_desc.Format), uint32_t(scene_source_state),
+            swgr_ui_snapshot ? swgr_ui_snapshot->generation : 0,
+            uevr::swgr_diag::packets.load(), uevr::swgr_diag::redirected.load(), uevr::swgr_diag::rejected.load(),
+            uevr::swgr_diag::width.load(), uevr::swgr_diag::height.load(), uevr::swgr_diag::hdr.load(), uevr::swgr_diag::packet_texture.load());
+    }
+
     const auto nascar25_native_copy_states = uevr::nascar::title25::native_copy_source_states(
         uevr::nascar::is_title25(), uevr::nascar::title25::is_validated_build(), g_framework->is_dx12(),
         native_stereo_packet != nullptr && vr->is_nascar_native_stereo_fix_requested(),
@@ -2963,6 +3012,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
         right_width = m_scene_capture_width,
         right_height = m_scene_capture_height,
         nascar25_native_copy_states,
+        swgr_independent_copy_states,
         stalker_exact,
         &stalker_composed,
         native_stereo_packet,
@@ -2997,6 +3047,10 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                 left_source.Get(), right_source.Get(), render_target, left_width, left_height);
             if (!stalker_composed) { return; }
             commands.has_commands = true;
+        } else if (swgr_independent_copy_states) {
+            uevr::swgr_copy::copy_double_wide(commands, left_source.Get(), right_source.Get(), render_target,
+                left_src_box, right_src_box, left_width);
+            SPDLOG_INFO_ONCE("[SWGRFix-v1][Copy] Corrected double-wide source states: left=SRVMask right=RENDER_TARGET; each source restored independently");
         } else if (nascar25_native_copy_states) {
             uevr::nascar::title25::copy_native_eye_pair(commands,
                 left_source.Get(), right_source.Get(), render_target,
@@ -3020,6 +3074,22 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
             }
             if (!stalker_exact) { native_stereo_hook->note_native_stereo_frame_packet_consumed(native_stereo_packet->serial); }
         }
+    };
+
+    const auto swgr_mono_copy = [source = m_game_tex.texture, half_width = m_backbuffer_size[0] / 2,
+        height = m_backbuffer_size[1], pre_render, native_stereo_packet, native_stereo_hook](d3d12::CommandContext& commands, ID3D12Resource* output) mutable {
+        if (source == nullptr || output == nullptr ||
+            !uevr::swgr_copy::valid_mono_layout(source->GetDesc(), output->GetDesc(), half_width, height)) {
+            SPDLOG_WARNING_EVERY_N_SEC(2, "[SWGRSuite][ManualMono] Layout rejected; retaining native copy path");
+            pre_render(commands, output);
+            return;
+        }
+        const D3D12_BOX box{0, 0, 0, half_width, height, 1};
+        uevr::swgr_copy::copy_mono_double_wide(commands, source.Get(), output, box, half_width);
+        if (native_stereo_packet && native_stereo_hook) {
+            native_stereo_hook->note_native_stereo_frame_packet_consumed(native_stereo_packet->serial);
+        }
+        SPDLOG_INFO_EVERY_N_SEC(2, "[SWGRSuite][MonoCopy] Primary scene crop copied to both eyes {}x{}; depth disabled for this mono submission", half_width, height);
     };
 
     const auto copy_stalker_pair = [&]() {
@@ -4127,6 +4197,9 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
     #endif
     }
 
+    if (swgr_manual_mono_active && scene_depth_tex != nullptr) {
+        scene_depth_tex.Reset();
+    }
     if (shf_using_mono_expansion && scene_depth_tex != nullptr) {
         if (shf_texture_diagnostics_enabled()) {
             SPDLOG_INFO_EVERY_N_SEC(2, "[SHf][D3D12] Suppressing depth submit while mono cutscene expansion is active");
@@ -4333,7 +4406,10 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                         vr->is_native_stereo_fix_texture_array_submit_enabled() &&
                         vr->m_openxr->swapchains.contains(native_stereo_array_swapchain);
 
-                    if (use_native_array_submit) {
+                    if (swgr_manual_mono_active) {
+                        m_openxr.copy((uint32_t)runtimes::OpenXR::SwapchainIndex::DOUBLE_WIDE, nullptr,
+                            swgr_mono_copy, std::nullopt, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr);
+                    } else if (use_native_array_submit) {
                         native_stereo_array_submit_active = true;
 
                         const auto source_desc = backbuffer->GetDesc();
@@ -4372,6 +4448,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                             left_source = m_game_tex.texture;
                             right_source = m_scene_capture_tex.texture;
                             left_source_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                            if (swgr_independent_copy_states) { left_source_state = scene_source_state; }
                             right_source_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
                             right_src_box.left = 0;
                             right_src_box.top = 0;
@@ -5457,6 +5534,7 @@ void D3D12Component::on_reset(VR* vr) {
     m_sw_zero_company_scene_snapshot_tex.reset();
     m_ue58_spectator_tex.reset();
     m_ue58_dedicated_ui_spectator_valid = false;
+    m_swgr_auto_mono.reset();
     m_scene_capture_tex.reset();
     m_scene_capture_generation = 0;
     m_scene_capture_width = 0;
