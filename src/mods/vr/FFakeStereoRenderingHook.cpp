@@ -6455,7 +6455,7 @@ void record_engine_render_timing(
 
 bool should_profile_engine_render_timing() {
     const auto vr = VR::get();
-    return is_ue_5_7_or_newer() && vr != nullptr && vr->is_hitch_diagnostics_enabled();
+    return is_ue_5_7_or_newer() && vr != nullptr && vr->is_frame_timing_enabled();
 }
 
 bool shf_is_valid_texture_with_vtable(FRHITexture2D* texture, void* required_vtable) {

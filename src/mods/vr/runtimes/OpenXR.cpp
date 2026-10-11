@@ -51,7 +51,7 @@ constexpr auto EVERSPACE2_COHERENT_SUBMIT_SUMMARY_INTERVAL = std::chrono::second
 
 bool collect_openxr_frame_timing() {
     const auto vr = VR::get();
-    return vr != nullptr && vr->is_hitch_diagnostics_enabled();
+    return vr != nullptr && vr->is_frame_timing_enabled();
 }
 
 struct ScopedOpenXRTiming {

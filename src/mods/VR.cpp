@@ -8531,7 +8531,51 @@ void VR::on_post_present() {
         return;
     }
 
+    const bool collect_frame_timing = is_frame_timing_enabled();
+    const auto lock_wait_start = collect_frame_timing
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
     std::scoped_lock _{m_openvr_mtx};
+    const auto lock_acquired = collect_frame_timing
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
+    if (collect_frame_timing) {
+        m_post_present_lock_wait_timing.add(lock_acquired - lock_wait_start);
+        if (m_last_server_performance_log.time_since_epoch().count() == 0) {
+            m_last_server_performance_log = lock_acquired;
+            DWORD_PTR process_affinity{}, system_affinity{};
+            const auto has_affinity = GetProcessAffinityMask(GetCurrentProcess(), &process_affinity, &system_affinity) != FALSE;
+            spdlog::info(
+                "[VR][server-performance] logical_processors={} affinity_available={} process_affinity=0x{:x} system_affinity=0x{:x}",
+                GetActiveProcessorCount(ALL_PROCESSOR_GROUPS), has_affinity,
+                process_affinity, system_affinity);
+        }
+    } else {
+        m_post_present_lock_wait_timing.reset();
+        m_post_present_lock_hold_timing.reset();
+        m_last_server_performance_log = {};
+    }
+    // The guard runs before the mutex unlock. Keep aggregation under the same lock.
+    utility::ScopeGuard server_timing_guard{[&]() {
+        if (!collect_frame_timing) {
+            return;
+        }
+        const auto finished = std::chrono::steady_clock::now();
+        m_post_present_lock_hold_timing.add(finished - lock_acquired);
+        if (finished - m_last_server_performance_log < std::chrono::seconds(5)) {
+            return;
+        }
+        spdlog::info(
+            "[VR][server-performance] post_present_lock_wait avg={:.2f}ms max={:.2f}ms n={} post_present_lock_hold avg={:.2f}ms max={:.2f}ms n={} sync_mode={} native_stereo={} desktop_mirror={} hmd={}",
+            m_post_present_lock_wait_timing.avg(), m_post_present_lock_wait_timing.max_ms,
+            m_post_present_lock_wait_timing.count, m_post_present_lock_hold_timing.avg(),
+            m_post_present_lock_hold_timing.max_ms, m_post_present_lock_hold_timing.count,
+            (int)get_synchronize_stage(), is_native_stereo_fix_enabled(),
+            m_desktop_fix->value(), is_hmd_active());
+        m_post_present_lock_wait_timing.reset();
+        m_post_present_lock_hold_timing.reset();
+        m_last_server_performance_log = finished;
+    }};
 
     if (!m_is_d3d12) {
         m_d3d11.on_post_present(this);
@@ -9543,6 +9587,16 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
     }
     
     if (selected_page == PAGE_DEBUG) {
+        if (ImGui::TreeNode("Server Performance Investigation")) {
+            ImGui::Text("Logical processors visible to Windows: %lu", GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
+            m_frame_timing_diagnostics->draw("Frame Timing Diagnostics");
+            ImGui::TextWrapped("Logs CPU wall times for engine render hooks, D3D12 copies/fences, OpenXR waits, and post-present lock contention. Does not enable hitch snapshots. Timers overlap and are not GPU execution times.");
+            m_desktop_fix->draw("Desktop Spectator View");
+            ImGui::TextWrapped("Disable the desktop spectator view for an isolated mirror-cost test. Headset resolution and refresh rate stay unchanged; the desktop VR mirror may disappear.");
+            m_sync_mode->draw("Frame Synchronization");
+            ImGui::TextWrapped("Keep Very Late for the initial timing baseline. Test one option at a time and verify both eyes, menus, cinematics, and crash sequences before accepting a change.");
+            ImGui::TreePop();
+        }
         if (m_fake_stereo_hook != nullptr) {
             m_fake_stereo_hook->on_draw_ui();
         }

@@ -1822,7 +1822,7 @@ d3d12::TextureContext* D3D12Component::render_dune_hmd_mono_scene_texture(
 
 vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
     m_shf_scene_retirement_deferred = false;
-    const bool collect_frame_timing = vr != nullptr && vr->is_hitch_diagnostics_enabled();
+    const bool collect_frame_timing = vr != nullptr && vr->is_frame_timing_enabled();
     d3d12::set_fence_profiler_enabled(collect_frame_timing);
 
     if (collect_frame_timing != m_frame_timing_collection_active) {
@@ -4766,7 +4766,7 @@ void D3D12Component::reset_frame_timing_stats() {
 }
 
 void D3D12Component::log_frame_timing_stats_if_needed(VR* vr) {
-    if (vr == nullptr || !vr->is_hitch_diagnostics_enabled()) {
+    if (vr == nullptr || !vr->is_frame_timing_enabled()) {
         return;
     }
 
@@ -5083,7 +5083,7 @@ void D3D12Component::draw_spectator_view(
     }
 
     const auto game_desc = game_tex.texture->GetDesc();
-    const bool collect_frame_timing = vr->is_hitch_diagnostics_enabled();
+    const bool collect_frame_timing = vr->is_frame_timing_enabled();
     const auto spectator_mirror_start = collect_frame_timing
         ? std::chrono::steady_clock::now()
         : std::chrono::steady_clock::time_point{};
@@ -5457,7 +5457,7 @@ void D3D12Component::clear_backbuffer() {
 }
 
 void D3D12Component::on_post_present(VR* vr) {
-    const bool collect_frame_timing = vr != nullptr && vr->is_hitch_diagnostics_enabled();
+    const bool collect_frame_timing = vr != nullptr && vr->is_frame_timing_enabled();
     const auto post_present_start = collect_frame_timing
         ? std::chrono::steady_clock::now()
         : std::chrono::steady_clock::time_point{};

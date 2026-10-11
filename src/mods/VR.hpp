@@ -713,6 +713,10 @@ public:
         return m_enable_hitch_diagnostics->value();
     }
 
+    bool is_frame_timing_enabled() const {
+        return m_frame_timing_diagnostics->value() || is_hitch_diagnostics_enabled();
+    }
+
     bool is_ahud_compatibility_enabled() const {
         if (uevr::nascar::is_target()) { return false; }
         return m_compatibility_ahud->value();
@@ -1440,6 +1444,7 @@ private:
     const ModToggle::Ptr m_enable_gui{ ModToggle::create(generate_name("EnableGUI"), true) };
     const ModToggle::Ptr m_enable_depth{ ModToggle::create(generate_name("PassDepthToRuntime"), false, true) };
     const ModToggle::Ptr m_enable_hitch_diagnostics{ ModToggle::create(generate_name("EnableHitchDiagnostics"), false, true) };
+    const ModToggle::Ptr m_frame_timing_diagnostics{ ModToggle::create(generate_name("FrameTimingDiagnostics"), false, true) };
     const ModToggle::Ptr m_ktjl_openxr_factory_repair{ ModToggle::create(generate_name("KTJLOpenXRFactoryRepair"), false, true) };
     const ModToggle::Ptr m_decoupled_pitch{ ModToggle::create(generate_name("DecoupledPitch"), false) };
     const ModToggle::Ptr m_decoupled_pitch_ui_adjust{ ModToggle::create(generate_name("DecoupledPitchUIAdjust"), true) };
@@ -1788,6 +1793,7 @@ public:
             *m_enable_gui,
             *m_enable_depth,
             *m_enable_hitch_diagnostics,
+            *m_frame_timing_diagnostics,
             *m_ktjl_openxr_factory_repair,
             *m_decoupled_pitch,
             *m_decoupled_pitch_ui_adjust,
@@ -2034,6 +2040,9 @@ private:
     bool m_first_submit{true};
     bool m_is_d3d12{false};
     bool m_hitch_diagnostics_enabled_last_frame{false};
+    runtimes::OpenXR::FrameTimingStats m_post_present_lock_wait_timing{};
+    runtimes::OpenXR::FrameTimingStats m_post_present_lock_hold_timing{};
+    std::chrono::steady_clock::time_point m_last_server_performance_log{};
     bool m_backbuffer_inconsistency{false};
     bool m_init_finished{false};
     bool m_has_hw_scheduling{false}; // hardware accelerated GPU scheduling
