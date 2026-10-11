@@ -49,6 +49,7 @@
 
 #include "VR.hpp"
 #include "vr/Stalker2NativePolicy.hpp"
+#include "vr/ServerPerformancePolicy.hpp"
 #include "UObjectHook.hpp"
 #include "GameSpecific.hpp"
 #include "vr/KtjLOpenXRFactory.hpp"
@@ -7703,9 +7704,23 @@ void VR::update_dpad_gestures() {
 void VR::on_config_load(const utility::Config& cfg, bool set_defaults) {
     ZoneScopedN(__FUNCTION__);
 
+    if (!m_launch_frame_timing_initialized) {
+        const auto exe_path = utility::get_module_pathw(GetModuleHandleW(nullptr));
+        const bool target_game = exe_path && sdk::galactic_racer::executable(*exe_path);
+        const auto path = uevr::server_performance::ini_path(g_framework->get_framework_module());
+        m_launch_frame_timing_diagnostics = uevr::server_performance::read_enabled(path, target_game);
+        m_launch_frame_timing_initialized = true;
+    }
+
     for (IModValue& option : m_options) {
         option.config_load(cfg, set_defaults);
     }
+
+    spdlog::info("[VR][timing-config] path={} reset_defaults={} raw={} profile={} launch={} effective={} hitch={} tid={}",
+        Framework::get_persistent_dir("config.txt").string(), set_defaults,
+        cfg.get("VR_FrameTimingDiagnostics").value_or("<missing>"),
+        m_frame_timing_diagnostics->value(), m_launch_frame_timing_diagnostics,
+        is_frame_timing_enabled(), is_hitch_diagnostics_enabled(), GetCurrentThreadId());
 
     if (set_defaults && is_subnautica2_executable()) {
         // Subnautica 2's UE5.6 native path can render SingleLayerWater black in the right eye.
@@ -8566,12 +8581,12 @@ void VR::on_post_present() {
             return;
         }
         spdlog::info(
-            "[VR][server-performance] post_present_lock_wait avg={:.2f}ms max={:.2f}ms n={} post_present_lock_hold avg={:.2f}ms max={:.2f}ms n={} sync_mode={} native_stereo={} desktop_mirror={} hmd={}",
+            "[VR][server-performance] post_present_lock_wait avg={:.2f}ms max={:.2f}ms n={} post_present_lock_hold avg={:.2f}ms max={:.2f}ms n={} sync_mode={} native_stereo={} desktop_mirror={} hmd={} tid={}",
             m_post_present_lock_wait_timing.avg(), m_post_present_lock_wait_timing.max_ms,
             m_post_present_lock_wait_timing.count, m_post_present_lock_hold_timing.avg(),
             m_post_present_lock_hold_timing.max_ms, m_post_present_lock_hold_timing.count,
             (int)get_synchronize_stage(), is_native_stereo_fix_enabled(),
-            m_desktop_fix->value(), is_hmd_active());
+            m_desktop_fix->value(), is_hmd_active(), GetCurrentThreadId());
         m_post_present_lock_wait_timing.reset();
         m_post_present_lock_hold_timing.reset();
         m_last_server_performance_log = finished;
@@ -9590,6 +9605,8 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
         if (ImGui::TreeNode("Server Performance Investigation")) {
             ImGui::Text("Logical processors visible to Windows: %lu", GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
             m_frame_timing_diagnostics->draw("Frame Timing Diagnostics");
+            ImGui::Text("Effective frame timing: %s (launch override: %s)",
+                is_frame_timing_enabled() ? "ON" : "OFF", m_launch_frame_timing_diagnostics ? "ON" : "OFF");
             ImGui::TextWrapped("Logs CPU wall times for engine render hooks, D3D12 copies/fences, OpenXR waits, and post-present lock contention. Does not enable hitch snapshots. Timers overlap and are not GPU execution times.");
             m_desktop_fix->draw("Desktop Spectator View");
             ImGui::TextWrapped("Disable the desktop spectator view for an isolated mirror-cost test. Headset resolution and refresh rate stay unchanged; the desktop VR mirror may disappear.");

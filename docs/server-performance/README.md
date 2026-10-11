@@ -16,6 +16,10 @@ The panel also exposes the existing Desktop Spectator View and Sync Mode control
 
 ## Reading the logs
 
+For unattended SWGR investigation, place the provided `UEVRServerPerformance.ini` beside `UEVRBackend.dll` before injection. `[Diagnostics] FrameTiming=1` enables the same lightweight timers for SWGR only, independently of profile saves or resets. It is read once per injected process. Remove the file or set `FrameTiming=0` and restart the game to disable this override. Other games and the default build behavior remain opt-in. This does not enable hitch snapshots or change rendering settings.
+
+`[VR][timing-config]` records the profile path, raw profile value, reset request, launch override and effective state at each configuration load. Confirm `effective=true` and actual profiler summaries before treating a capture as an internally measured run. The post-present timing summary also records its current Windows thread ID for correlation with external CPU sampling.
+
 Timing summaries are emitted at approximately five-second intervals while the relevant paths are active:
 
 - `[UE57][engine-render-profiler]`: CPU wall time in selected engine render hooks, including the secondary-eye work that those hooks cover.

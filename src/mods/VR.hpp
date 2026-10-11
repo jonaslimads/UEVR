@@ -714,8 +714,13 @@ public:
     }
 
     bool is_frame_timing_enabled() const {
-        return m_frame_timing_diagnostics->value() || is_hitch_diagnostics_enabled();
+        return m_launch_frame_timing_diagnostics || m_frame_timing_diagnostics->value() || is_hitch_diagnostics_enabled();
     }
+
+private:
+    bool m_launch_frame_timing_diagnostics{};
+    bool m_launch_frame_timing_initialized{};
+public:
 
     bool is_ahud_compatibility_enabled() const {
         if (uevr::nascar::is_target()) { return false; }
